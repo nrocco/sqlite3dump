@@ -1,0 +1,101 @@
+#!/bin/bash
+
+ECHO='/bin/echo -e'
+SED='/bin/sed'
+AWK='/usr/bin/awk'
+SQLITE='/usr/bin/sqlite3'
+SORT='/usr/bin/sort'
+TR='/usr/bin/tr'
+RM='/bin/rm'
+VERBOSE='NO'
+COMPLETE_INSERT='NO'
+BACKUP_SUFFIX=".only_data.bak"
+
+function log() {
+  if [ "YES" = "$VERBOSE" ]; then
+    echo "$1"
+  fi
+  return 0
+}
+
+function help_text() {
+  echo "Usage: $(basename $0) [-c] [-v] [-o filename] database.sqlite"
+  echo
+  echo '        -c  Set this option if you want to include column names in'
+  echo '            the INSERT sql statements'
+  echo '        -v  Set this option to turn on verbose mode'
+  echo '        -o  Use this option to specify the filename for the sqlite backup'
+  echo '            If not set the backup file will be the same as the sqlite input file'
+  echo '            with .only_data.bak as a suffix'
+  echo
+  if [ "" != "$1" ]; then
+    echo "$1"
+  fi
+}
+
+while getopts "hvo:c" option; do
+  case "$option" in
+    v)
+      VERBOSE='YES'
+      ;;
+    o)
+      BACKUP="$OPTARG"
+      ;;
+    c)
+      COMPLETE_INSERT='YES'
+      ;;
+    h)
+      help_text
+      exit 0
+      ;;
+    :)
+      help_text "Option -$option requires an argument"
+      exit 1
+      ;;
+    [?])
+      help_text "Invalid parameter given: -$option"
+      exit 1
+      ;;
+  esac
+done
+
+shift $(($OPTIND-1))
+
+if [ ! -f "$1" ]
+then
+  help_text "You must supply the path to an existing sqlite file as the first argument.\nGiven: $1"
+  exit 1
+fi
+
+if [ "" = "$BACKUP" ]; then
+  BACKUP="$1$BACKUP_SUFFIX"
+fi
+
+
+INITFILE=$(mktemp)
+log "Creating sqlite init file in $INITFILE"
+TABLES=$(sqlite3 $1 .tables | awk '{print $1 "\n" $2}' | $SORT)
+
+# Dump only data from tables (without schema sql)
+echo ".output $BACKUP" > $INITFILE
+for table in $TABLES; do
+  log "Adding backup instructions for $table to $INITFILE"
+  echo ".mode insert $table"   >> $INITFILE
+  echo "SELECT * FROM $table;" >> $INITFILE
+done
+
+log "Creating backup at $BACKUP"
+sqlite3 -init $INITFILE $1 .quit && log "Backup created"
+rm $INITFILE && log "sqlite init file removed"
+
+if [ "YES" = "$COMPLETE_INSERT" ]; then
+  # Add column names to INSERT statements
+  for table in $TABLES; do
+    columns=$(sqlite3 $1 "PRAGMA table_info($table);" | awk -F '|' '{print $2 ","}' | tr -d '\n' | sed 's/,$//')
+    sed --in-place "s/^\(INSERT INTO $table\)\( VALUES\)/\1($columns)\2/" $BACKUP
+  done
+  log "Modified all INSERT statements to include column names."
+fi
+
+log "Backup created at: $BACKUP"
+exit 0
