@@ -1,12 +1,12 @@
 #!/bin/bash
 
-ECHO='/bin/echo -e'
 SED='/bin/sed'
 AWK='/usr/bin/awk'
 SQLITE='/usr/bin/sqlite3'
 SORT='/usr/bin/sort'
 TR='/usr/bin/tr'
 RM='/bin/rm'
+
 VERBOSE='NO'
 COMPLETE_INSERT='NO'
 BACKUP_SUFFIX=".only_data.bak"
@@ -63,7 +63,7 @@ shift $(($OPTIND-1))
 
 if [ ! -f "$1" ]
 then
-  help_text "You must supply the path to an existing sqlite file as the first argument.\nGiven: $1"
+  help_text "You must supply the path to an existing sqlite file as the first argument. Found: $1"
   exit 1
 fi
 
@@ -74,7 +74,7 @@ fi
 
 INITFILE=$(mktemp)
 log "Creating sqlite init file in $INITFILE"
-TABLES=$(sqlite3 $1 .tables | awk '{print $1 "\n" $2}' | $SORT)
+TABLES=$($SQLITE $1 .tables | $AWK '{print $1 "\n" $2}' | $SORT)
 
 # Dump only data from tables (without schema sql)
 echo ".output $BACKUP" > $INITFILE
@@ -85,14 +85,14 @@ for table in $TABLES; do
 done
 
 log "Creating backup at $BACKUP"
-sqlite3 -init $INITFILE $1 .quit && log "Backup created"
-rm $INITFILE && log "sqlite init file removed"
+$SQLITE -init $INITFILE $1 .quit && log "Backup created"
+$RM $INITFILE && log "sqlite init file removed"
 
 if [ "YES" = "$COMPLETE_INSERT" ]; then
   # Add column names to INSERT statements
   for table in $TABLES; do
-    columns=$(sqlite3 $1 "PRAGMA table_info($table);" | awk -F '|' '{print $2 ","}' | tr -d '\n' | sed 's/,$//')
-    sed --in-place "s/^\(INSERT INTO $table\)\( VALUES\)/\1($columns)\2/" $BACKUP
+    columns=$($SQLITE $1 "PRAGMA table_info($table);" | $AWK -F '|' '{print $2 ","}' | $TR -d '\n' | $SED 's/,$//')
+    $SED --in-place "s/^\(INSERT INTO $table\)\( VALUES\)/\1($columns)\2/" $BACKUP
   done
   log "Modified all INSERT statements to include column names."
 fi
